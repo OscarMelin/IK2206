@@ -265,33 +265,34 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
-  /* assign the destination address */
-  memset(&remote, 0, sizeof(remote));
-  remote.sin_family = AF_INET;
-  remote.sin_addr.s_addr = inet_addr(remote_ip);
-  remote.sin_port = htons(port);
+  if (cliserv == CLIENT) {
 
-  memset(&local, 0, sizeof(local));
-  local.sin_family = AF_INET;
-  local.sin_addr.s_addr = htonl(INADDR_ANY);
-  local.sin_port = htons(port);
+    memset(&local, 0, sizeof(local));
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(INADDR_ANY);
+    local.sin_port = htons(port);
 
-  if (bind(sock_fd, (struct sockaddr*) &local, sizeof(local)) < 0){
-    perror("bind()");
-    exit(1);
+    /* assign the destination address */
+    memset(&remote, 0, sizeof(remote));
+    remote.sin_family = AF_INET;
+    remote.sin_addr.s_addr = inet_addr(remote_ip);
+    remote.sin_port = htons(port);
+
+    if (bind(sock_fd, (struct sockaddr*) &local, sizeof(local)) < 0){
+      perror("bind()");
+      exit(1);
+    }
+
+    /* connection request */
+    if (connect(sock_fd, (struct sockaddr*) &remote, sizeof(remote)) < 0){
+      perror("connect()");
+      exit(1);
+    }
+
+    net_fd = sock_fd;
+    do_debug("CLIENT: Connected to server %s\n", inet_ntoa(remote.sin_addr));
+    do_debug("SERVER: Client connected from %s\n", inet_ntoa(remote.sin_addr));
   }
-
-  /* connection request */
-  if (connect(sock_fd, (struct sockaddr*) &remote, sizeof(remote)) < 0){
-    perror("connect()");
-    exit(1);
-  }
-
-  net_fd = sock_fd;
-  do_debug("CLIENT: Connected to server %s\n", inet_ntoa(remote.sin_addr));
-  do_debug("SERVER: Client connected from %s\n", inet_ntoa(remote.sin_addr));
-
-  
   /* use select() to handle two descriptors at once */
   maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
 
