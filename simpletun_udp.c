@@ -142,9 +142,9 @@ void do_debug(char *msg, ...){
   va_list argp;
   
   if(debug){
-    va_start(argp, msg);
-    vfprintf(stderr, msg, argp);
-    va_end(argp);
+	va_start(argp, msg);
+	vfprintf(stderr, msg, argp);
+	va_end(argp);
   }
 }
 
@@ -259,18 +259,13 @@ int main(int argc, char *argv[]) {
 
   do_debug("Successfully connected to interface %s\n", if_name);
 
-  /* SOCK_DGRAM for UDP */
   if ( (sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
     perror("socket()");
     exit(1);
   }
 
-  if (cliserv == CLIENT) {
-
-    memset(&local, 0, sizeof(local));
-    local.sin_family = AF_INET;
-    local.sin_addr.s_addr = htonl(INADDR_ANY);
-    local.sin_port = htons(port);
+  if(cliserv==CLIENT){
+    /* Client, try to connect to server */
 
     /* assign the destination address */
     memset(&remote, 0, sizeof(remote));
@@ -278,21 +273,33 @@ int main(int argc, char *argv[]) {
     remote.sin_addr.s_addr = inet_addr(remote_ip);
     remote.sin_port = htons(port);
 
+    net_fd = sock_fd;    
+    
+  } else {
+    /* Server, wait for connections */
+
+    /* avoid EADDRINUSE error on bind() */
+    if(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&optval, sizeof(optval)) < 0){
+      perror("setsockopt()");
+      exit(1);
+    }
+    
+    memset(&local, 0, sizeof(local));
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(INADDR_ANY);
+    local.sin_port = htons(port);
     if (bind(sock_fd, (struct sockaddr*) &local, sizeof(local)) < 0){
       perror("bind()");
       exit(1);
     }
-
-    /* connection request */
-    if (connect(sock_fd, (struct sockaddr*) &remote, sizeof(remote)) < 0){
-      perror("connect()");
-      exit(1);
-    }
-
-    net_fd = sock_fd;
-    do_debug("CLIENT: Connected to server %s\n", inet_ntoa(remote.sin_addr));
-    do_debug("SERVER: Client connected from %s\n", inet_ntoa(remote.sin_addr));
+        
+    /* wait for connection request */
+    remotelen = sizeof(remote);
+    memset(&remote, 0, remotelen);
+		
+	net_fd = sock_fd;
   }
+  
   /* use select() to handle two descriptors at once */
   maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
 
@@ -301,8 +308,7 @@ int main(int argc, char *argv[]) {
     fd_set rd_set;
 
     FD_ZERO(&rd_set);
-    FD_SET(tap_fd, &rd_set);
-    FD_SET(net_fd, &rd_set);
+    FD_SET(tap_fd, &rd_set); FD_SET(net_fd, &rd_set);
 
     ret = select(maxfd + 1, &rd_set, NULL, NULL, NULL);
 
@@ -324,9 +330,13 @@ int main(int argc, char *argv[]) {
       do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
       /* write length + packet */
-      plength = htons(nread);
-      nwrite = cwrite(net_fd, (char *)&plength, sizeof(plength));
-      nwrite = cwrite(net_fd, buffer, nread);
+      plength = htons(nread);      	
+	  if ((nwrite = sendto(net_fd, (char *)&plength, sizeof(plength), 0, (struct sockaddr *)&remote, sizeof(remote))) <0){
+	    perror("sendto");
+	  } 
+	  if ((nwrite = sendto(net_fd, buffer, nread, 0, (struct sockaddr *)&remote, sizeof(remote))) <0){
+	    perror("sendto");
+	  }
       
       do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
@@ -336,7 +346,8 @@ int main(int argc, char *argv[]) {
        * We need to read the length first, and then the packet */
 
       /* Read length */      
-      nread = read_n(net_fd, (char *)&plength, sizeof(plength));
+      nread = recvfrom(net_fd, (char *)&plength, sizeof(plength), 0,  (struct sockaddr *)&remote, &remotelen);	
+	  do_debug("Read %d bytes from the network (UDP).\n", nread);
       if(nread == 0) {
         /* ctrl-c at the other end */
         break;
@@ -345,7 +356,7 @@ int main(int argc, char *argv[]) {
       net2tap++;
 
       /* read packet */
-      nread = read_n(net_fd, buffer, ntohs(plength));
+      nread = recvfrom(net_fd, buffer, ntohs(plength), 0, (struct sockaddr *)&remote, &remotelen);
       do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
 
       /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
