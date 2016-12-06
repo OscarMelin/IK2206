@@ -299,7 +299,8 @@ int main(int argc, char *argv[]) {
     fd_set rd_set;
 
     FD_ZERO(&rd_set);
-    FD_SET(tap_fd, &rd_set); FD_SET(net_fd, &rd_set);
+    FD_SET(tap_fd, &rd_set);
+    FD_SET(net_fd, &rd_set);
 
     ret = select(maxfd + 1, &rd_set, NULL, NULL, NULL);
 
