@@ -107,13 +107,11 @@ int cread(int fd, char *buf, int n){
 int cwrite(int fd, char *buf, int n){
   
   int nwrite;
-printf("fd: %d   buf: %p   n:   %d\n", fd, buf, n);
 
   if((nwrite=write(fd, buf, n))<0){
     perror("Writing data");
     exit(1);
   }
-printf("nwrite: %d\n", nwrite);
   return nwrite;
 }
 
@@ -318,7 +316,6 @@ int main(int argc, char *argv[]) {
 
     if(FD_ISSET(tap_fd, &rd_set)){
       /* data from tun/tap: just read it and write it to the network */
-      printf("tap_fd\n");
       
       nread = cread(tap_fd, buffer, BUFSIZE);
 
@@ -326,7 +323,7 @@ int main(int argc, char *argv[]) {
       do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
       /* write length + packet */
-      plength = htons(nread);      	
+      plength = nread;      	
 	  nwrite = cwrite(net_fd, (char *) &plength, sizeof(plength));
       nwrite = cwrite(net_fd, buffer, plength);
       
@@ -334,7 +331,6 @@ int main(int argc, char *argv[]) {
     }
 
     if(FD_ISSET(net_fd, &rd_set)){
-      printf("net_fd\n");
       /* data from the network: read it, and write it to the tun/tap interface. 
        * We need to read the length first, and then the packet */
 	   
@@ -344,7 +340,6 @@ int main(int argc, char *argv[]) {
            /* ctrl-c at the other end */
             break;
       }
-	printf("length read: %d\n", plength);
       net2tap++;
 
 
