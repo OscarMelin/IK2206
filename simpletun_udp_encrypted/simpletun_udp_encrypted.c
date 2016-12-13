@@ -91,7 +91,7 @@ int tun_alloc(char *dev, int flags) {
  **************************************************************************/
 int cread(int fd, char *buf, int n){
   
-  int nread;
+  int nread;	
 
   if((nread=read(fd, buf, n))<0){
     perror("Reading data");
@@ -107,11 +107,13 @@ int cread(int fd, char *buf, int n){
 int cwrite(int fd, char *buf, int n){
   
   int nwrite;
+printf("fd: %d   buf: %p   n:   %d\n", fd, buf, n);
 
   if((nwrite=write(fd, buf, n))<0){
     perror("Writing data");
     exit(1);
   }
+printf("nwrite: %d\n", nwrite);
   return nwrite;
 }
 
@@ -122,6 +124,7 @@ int cwrite(int fd, char *buf, int n){
 int read_n(int fd, char *buf, int n) {
 
   int nread, left = n;
+
 
   while(left > 0) {
     if ((nread = cread(fd, buf, left))==0){
@@ -283,13 +286,13 @@ int main(int argc, char *argv[]) {
       perror("bind()");
       exit(1);
     }
-        
+
     if (connect(sock_fd, (struct sockaddr *) &remote, sizeof(remote)) < 0) {
         perror("connect()");
         exit(1);
     }
 	
-	net_fd = sock_fd;
+    net_fd = sock_fd;
 	
   
   /* use select() to handle two descriptors at once */
@@ -315,6 +318,7 @@ int main(int argc, char *argv[]) {
 
     if(FD_ISSET(tap_fd, &rd_set)){
       /* data from tun/tap: just read it and write it to the network */
+      printf("tap_fd\n");
       
       nread = cread(tap_fd, buffer, BUFSIZE);
 
@@ -324,12 +328,13 @@ int main(int argc, char *argv[]) {
       /* write length + packet */
       plength = htons(nread);      	
 	  nwrite = cwrite(net_fd, (char *) &plength, sizeof(plength));
-      nwrite = cwrite(net_fd, buffer, BUFSIZE);
+      nwrite = cwrite(net_fd, buffer, plength);
       
       do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
 
     if(FD_ISSET(net_fd, &rd_set)){
+      printf("net_fd\n");
       /* data from the network: read it, and write it to the tun/tap interface. 
        * We need to read the length first, and then the packet */
 	   
@@ -339,11 +344,12 @@ int main(int argc, char *argv[]) {
            /* ctrl-c at the other end */
             break;
       }
-
+	printf("length read: %d\n", plength);
       net2tap++;
 
+
       /* read packet */
-      nread = read_n(net_fd, buffer, ntohs(plength));
+      nread = read_n(net_fd, buffer, plength);
       do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
 	  
 	  /* ADD DECRYPT */ 	  
