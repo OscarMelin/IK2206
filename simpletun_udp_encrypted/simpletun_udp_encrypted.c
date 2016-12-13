@@ -262,43 +262,35 @@ int main(int argc, char *argv[]) {
   if ( (sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
     perror("socket()");
     exit(1);
-  }
+  }  
 
-  if(cliserv==CLIENT){
-    /* Client, try to connect to server */
-
-    /* assign the destination address */
+	memset(&local, 0, sizeof(local));
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(INADDR_ANY);
+    local.sin_port = htons(port);
+	
     memset(&remote, 0, sizeof(remote));
     remote.sin_family = AF_INET;
     remote.sin_addr.s_addr = inet_addr(remote_ip);
     remote.sin_port = htons(port);
-
-    net_fd = sock_fd;    
-    
-  } else {
-    /* Server, wait for connections */
-
-    /* avoid EADDRINUSE error on bind() */
-    if(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&optval, sizeof(optval)) < 0){
+	
+	if(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&optval, sizeof(optval)) < 0){
       perror("setsockopt()");
       exit(1);
     }
-    
-    memset(&local, 0, sizeof(local));
-    local.sin_family = AF_INET;
-    local.sin_addr.s_addr = htonl(INADDR_ANY);
-    local.sin_port = htons(port);
+	
     if (bind(sock_fd, (struct sockaddr*) &local, sizeof(local)) < 0){
       perror("bind()");
       exit(1);
     }
         
-    /* wait for connection request */
-    remotelen = sizeof(remote);
-    memset(&remote, 0, remotelen);
-		
+    if (connect(sock_fd, (struct sockaddr *) &remote, sizeof(remote)) < 0) {
+        perror("connect()");
+        exit(1);
+    }
+	
 	net_fd = sock_fd;
-  }
+	
   
   /* use select() to handle two descriptors at once */
   maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
@@ -331,12 +323,8 @@ int main(int argc, char *argv[]) {
 
       /* write length + packet */
       plength = htons(nread);      	
-	  if ((nwrite = sendto(net_fd, (char *)&plength, sizeof(plength), 0, (struct sockaddr *)&remote, sizeof(remote))) <0){
-	    perror("sendto");
-	  } 
-	  if ((nwrite = sendto(net_fd, buffer, nread, 0, (struct sockaddr *)&remote, sizeof(remote))) <0){
-	    perror("sendto");
-	  }
+	  nwrite = cwrite(net_fd, (char *) &plength, sizeof(plength));
+      nwrite = cwrite(net_fd, buffer, BUFSIZE);
       
       do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
@@ -344,20 +332,21 @@ int main(int argc, char *argv[]) {
     if(FD_ISSET(net_fd, &rd_set)){
       /* data from the network: read it, and write it to the tun/tap interface. 
        * We need to read the length first, and then the packet */
-
+	   
       /* Read length */      
-      nread = recvfrom(net_fd, (char *)&plength, sizeof(plength), 0,  (struct sockaddr *)&remote, &remotelen);	
-	  do_debug("Read %d bytes from the network (UDP).\n", nread);
-      if(nread == 0) {
-        /* ctrl-c at the other end */
-        break;
+      nread = read_n(net_fd, (char *) &plength, sizeof(plength));
+      if (nread == 0) {
+           /* ctrl-c at the other end */
+            break;
       }
 
       net2tap++;
 
       /* read packet */
-      nread = recvfrom(net_fd, buffer, ntohs(plength), 0, (struct sockaddr *)&remote, &remotelen);
+      nread = read_n(net_fd, buffer, ntohs(plength));
       do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
+	  
+	  /* ADD DECRYPT */ 	  
 
       /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
       nwrite = cwrite(tap_fd, buffer, nread);
