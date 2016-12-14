@@ -212,6 +212,7 @@ int main(int argc, char *argv[]) {
         break;
       case 's':
         cliserv = SERVER;
+        strncpy(remote_ip,optarg,15);
         break;
       case 'c':
         cliserv = CLIENT;
@@ -258,12 +259,12 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
-  do_debug("Successfully connected to interface %s\n", if_name);
+	do_debug("Successfully connected to interface %s\n", if_name);
 
-  if ( (sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-    perror("socket()");
-    exit(1);
-  }  
+	if ( (sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+		perror("socket()");
+		exit(1);
+	}  
 
 	memset(&local, 0, sizeof(local));
     local.sin_family = AF_INET;
@@ -291,10 +292,23 @@ int main(int argc, char *argv[]) {
     }
 	
     net_fd = sock_fd;
+	int cpid = fork();
+	
+	if(cpid == 0){
+		if(cliserv == SERVER)		
+			serverSecureTunnel();
+		else 
+			clientSecureTunnel(remote_ip);
+	}else if (cpid < 0){
+		printf("Impossible to start secure channel (fork)\n");
+		exit(-1);
+	}
+	
+	
 	
   
-  /* use select() to handle two descriptors at once */
-  maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
+	/* use select() to handle two descriptors at once */
+	maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
 
   while(1) {
     int ret;
@@ -357,3 +371,66 @@ int main(int argc, char *argv[]) {
   
   return(0);
 }
+
+void serverSecureTunnel(){
+	int serverSocket, newSocket;
+	char buffer[1024];
+	struct sockaddr_in serverAddr;
+	struct sockaddr_storage serverStorage;
+	socklen_t addr_size;
+	char buffer[32];
+
+	if( (serverSocket = socket(AF_INET,SOCK_STREAM,0)) <0 )
+		err_exit("Couldn't make socket");
+  
+	memset(&serverAddr, '\0', sizeof(serverAddr));
+	serverAddr.sin_family = AF_INET;
+	serverAddr.sin_port = htons(4433);
+	serverAddr.sin_addr.s_addr = INADDR_ANY;
+
+	if( bind(serverSocket,(struct sockaddr *)&serverAddr,sizeof(serverAddr)) <0 )
+      perror("Couldn't bind");
+
+	if(listen(serverSocket,5)==0)
+		printf("Listening\n");
+	else
+		perror("Listen");
+
+	addr_size = sizeof serverStorage;
+	if( newSocket = accept(serverSocket, (struct sockaddr *) &serverStorage, &addr_size) < 0)
+		perror("Accept");
+
+	read(newSocket, buffer, 32);
+	
+
+  return 0;
+
+}
+
+void clientSecureTunnel(char * server){
+
+	int clientSocket;
+    struct sockaddr_in server; 
+	char buffer[32] = "Hello world\n";
+     
+    if( (clientSocket = socket(AF_INET , SOCK_STREAM , 0)) < 0){
+		perror("Socket");    
+		return ;
+	}
+    puts("Socket created");
+     
+    server.sin_addr.s_addr = inet_addr(server);
+    server.sin_family = AF_INET;
+    server.sin_port = htons( 4433 );
+ 
+    //Connect to remote server
+    if ( connect(clientSocket, (struct sockaddr *)&server , sizeof(server)) < 0){
+        perror("Connect");
+        return 1;
+    }
+	
+	write(clientSocket, buffer, 32);
+	
+}
+
+
