@@ -1,26 +1,3 @@
-/**************************************************************************
- * simpletun.c                                                            *
- *                                                                        *
- * A simplistic, simple-minded, naive tunnelling program using tun/tap    *
- * interfaces and TCP. Handles (badly) IPv4 for tun, ARP and IPv4 for     *
- * tap. DO NOT USE THIS PROGRAM FOR SERIOUS PURPOSES.                     *
- *                                                                        *
- * You have been warned.                                                  *
- *                                                                        *
- * (C) 2009 Davide Brini.                                                 *
- *                                                                        *
- * DISCLAIMER AND WARNING: this is all work in progress. The code is      *
- * ugly, the algorithms are naive, error checking and input validation    *
- * are very basic, and of course there can be bugs. If that's not enough, *
- * the program has not been thoroughly tested, so it might even fail at   *
- * the few simple things it should be supposed to do right.               *
- * Needless to say, I take no responsibility whatsoever for what the      *
- * program might do. The program has been written mostly for learning     *
- * purposes, and can be used in the hope that is useful, but everything   *
- * is to be taken "as is" and without any kind of warranty, implicit or   *
- * explicit. See the file LICENSE for further details.                    *
- *************************************************************************/ 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -263,9 +240,7 @@ int main(int argc, char *argv[]) {
   unsigned long int tap2net = 0, net2tap = 0;
 
   progname = argv[0];
-  
-	test();
-    
+      
 
   /* Check command line options */
   while((option = getopt(argc, argv, "i:s:c:p:uahd")) > 0){
@@ -336,31 +311,31 @@ int main(int argc, char *argv[]) {
 	}  
 
 	memset(&local, 0, sizeof(local));
-    local.sin_family = AF_INET;
-    local.sin_addr.s_addr = htonl(INADDR_ANY);
-    local.sin_port = htons(port);
+  local.sin_family = AF_INET;
+  local.sin_addr.s_addr = htonl(INADDR_ANY);
+  local.sin_port = htons(port);
 	
-    memset(&remote, 0, sizeof(remote));
-    remote.sin_family = AF_INET;
-    remote.sin_addr.s_addr = inet_addr(remote_ip);
-    remote.sin_port = htons(port);
+  memset(&remote, 0, sizeof(remote));
+  remote.sin_family = AF_INET;
+  remote.sin_addr.s_addr = inet_addr(remote_ip);
+  remote.sin_port = htons(port);
 	
 	if(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&optval, sizeof(optval)) < 0){
-      perror("setsockopt()");
-      exit(1);
-    }
+    perror("setsockopt()");
+    exit(1);
+  }
 	
-    if (bind(sock_fd, (struct sockaddr*) &local, sizeof(local)) < 0){
-      perror("bind()");
-      exit(1);
-    }
+  if (bind(sock_fd, (struct sockaddr*) &local, sizeof(local)) < 0){
+    perror("bind()");
+    exit(1);
+  }
 
-    if (connect(sock_fd, (struct sockaddr *) &remote, sizeof(remote)) < 0) {
-        perror("connect()");
-        exit(1);
-    }
-	
-    net_fd = sock_fd;
+  if (connect(sock_fd, (struct sockaddr *) &remote, sizeof(remote)) < 0) {
+      perror("connect()");
+      exit(1);
+  }
+
+  net_fd = sock_fd;
 	/*
 	int cpid = fork();
 	
@@ -380,7 +355,6 @@ int main(int argc, char *argv[]) {
   
 	/* use select() to handle two descriptors at once */
 	maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
-
 	
 	/* Initialise the library */
 	ERR_load_crypto_strings();
@@ -407,17 +381,18 @@ int main(int argc, char *argv[]) {
 
     if(FD_ISSET(tap_fd, &rd_set)){
       /* data from tun/tap: just read it and write it to the network */
+			printf("tap_fd\n");
       
       nread = cread(tap_fd, buffer, BUFSIZE);
 
       tap2net++;
       do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 	  
-			BIO_dump_fp (stdout, (const char *)buffer, strlen(buffer));
+			BIO_dump_fp (stdout, (const char *)buffer, nread);
+
 			/* ENCRYPT */
 			unsigned char ciphertext[128];
-			int ciphertext_len = encrypt (buffer, strlen ((char *)buffer), key, iv,
-		                          ciphertext);
+			int ciphertext_len = encrypt (buffer, nread, key, iv, ciphertext);
 			printf("Ciphertext is:\n");
 			BIO_dump_fp (stdout, (const char *)ciphertext, ciphertext_len);
 	  
@@ -433,6 +408,7 @@ int main(int argc, char *argv[]) {
     if(FD_ISSET(net_fd, &rd_set)){
       /* data from the network: read it, and write it to the tun/tap interface. 
        * We need to read the length first, and then the packet */
+			printf("net_fd\n");
 	   
       /* Read length */      
       nread = read_n(net_fd, (char *) &plength, sizeof(plength));
@@ -440,6 +416,7 @@ int main(int argc, char *argv[]) {
            /* ctrl-c at the other end */
             break;
       }
+			printf("NET2TAP: Length read: %d\n", plength);
       net2tap++;
 
 
@@ -449,7 +426,7 @@ int main(int argc, char *argv[]) {
 	  
 		  /* ADD DECRYPT */ 
 			unsigned char decryptedtext[128];
-			int decryptedtext_len = decrypt(buffer, strlen(buffer), key, iv, decryptedtext);	
+			int decryptedtext_len = decrypt(buffer, nread, key, iv, decryptedtext);	
 
 			/* Add a NULL terminator. We are expecting printable text */
   		decryptedtext[decryptedtext_len] = '\0';
@@ -458,9 +435,11 @@ int main(int argc, char *argv[]) {
 		  printf("%s\n", decryptedtext);  
 
       /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
-      nwrite = cwrite(tap_fd, buffer, nread);
+      nwrite = cwrite(tap_fd, decryptedtext, decryptedtext_len);
       do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
     }
+		EVP_cleanup();
+  	ERR_free_strings();
   }
   
   return(0);
@@ -587,7 +566,7 @@ int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *key,
 	* EVP_DecryptUpdate can be called multiple times if necessary
 	*/
 	if(1 != EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
-	handleErrors();
+		handleErrors();
 	plaintext_len = len;
 
 	/* Finalise the decryption. Further plaintext bytes may be written at
