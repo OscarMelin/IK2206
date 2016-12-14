@@ -395,12 +395,26 @@ int main(int argc, char *argv[]) {
 			int ciphertext_len = encrypt (buffer, nread, key, iv, ciphertext);
 			printf("Ciphertext is long: %d\n", ciphertext_len);
 			BIO_dump_fp (stdout, (const char *)ciphertext, ciphertext_len);
-	  
+
+			/* Adding MAC */
+			unsigned char *mac = HMAC(EVP_sha256(), key, 32, ciphertext, ciphertext_len, NULL, NULL);
+
+      int newLen = 32 + ciphertext_len;
+      unsigned char newPacket[newLen];
+      int i;
+      for (i = 0; i < 32; i++) {
+          newPacket[i] = mac[i];
+      }
+      int j = 0;
+      for (i = 32; i < msg_len; i++) {
+          newPacket[i] = ciphertext[j];
+          j++;
+      }	  
 	  
       /* write length + packet */
-      plength = ciphertext_len;      	
+      plength = newLen;      	
 	  	nwrite = cwrite(net_fd, (char *) &plength, sizeof(plength));
-      nwrite = cwrite(net_fd, ciphertext, ciphertext_len);
+      nwrite = cwrite(net_fd, newPacket, plength);
       
       do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
@@ -419,12 +433,37 @@ int main(int argc, char *argv[]) {
 			printf("NET2TAP: Length read: %d\n", plength);
       net2tap++;
 
-
       /* read packet */
       nread = read_n(net_fd, buffer, plength);
       do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
+
+			/* Checking MAC */
+			int i, j;
+			unsigned char mac[32];
+			unsigned char ciphertext[plength-32];
+
+			for(i = 32, j = 0; i < plength; i++, j++)
+				ciphertext[j] = buffer[i];			
+			strncpy(mac, buffer, 32);
+
+			unsigned char compareMac = HMAC(EVP_sha256(), key, 32, ciphertext, plength-32, NULL, NULL);
+
+			int different = 0;			
+			for(i = 0; i < 32; i++){
+				if( mac[i] != compareMac[i]){
+					different = 1;
+					break;
+				}
+			}
+			if(different){
+					printf("MACs doesn't match\n");
+					BIO_dump_fp (stdout, (const char *)mac, 32);
+					continue;
+			}
+		  else	printf("MAC verified correctly\n");
+			
 	  
-		  /* ADD DECRYPT */ 
+		  /* DECRYPT */ 
 			unsigned char decryptedtext[BUFSIZE];
 			int decryptedtext_len = decrypt(buffer, nread, key, iv, decryptedtext);
 
