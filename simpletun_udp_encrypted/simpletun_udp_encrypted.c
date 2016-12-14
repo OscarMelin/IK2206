@@ -49,6 +49,9 @@
 #define ETH_HDR_LEN 14
 #define ARP_PKT_LEN 28
 
+void clientSecureTunnel(char * server);
+void serverSecureTunnel();
+
 int debug;
 char *progname;
 
@@ -179,7 +182,7 @@ void usage(void) {
 }
 
 int main(int argc, char *argv[]) {
-  
+
   int tap_fd, option;
   int flags = IFF_TUN;
   char if_name[IFNAMSIZ] = "";
@@ -199,7 +202,7 @@ int main(int argc, char *argv[]) {
   progname = argv[0];
   
   /* Check command line options */
-  while((option = getopt(argc, argv, "i:sc:p:uahd")) > 0){
+  while((option = getopt(argc, argv, "i:s:c:p:uahd")) > 0){
     switch(option) {
       case 'd':
         debug = 1;
@@ -295,15 +298,17 @@ int main(int argc, char *argv[]) {
 	int cpid = fork();
 	
 	if(cpid == 0){
-		if(cliserv == SERVER)		
+		if(cliserv == SERVER){		
 			serverSecureTunnel();
-		else 
+		}
+		else {
 			clientSecureTunnel(remote_ip);
+		}
 	}else if (cpid < 0){
 		printf("Impossible to start secure channel (fork)\n");
 		exit(-1);
 	}
-	
+	sleep(10);
 	
 	
   
@@ -374,14 +379,13 @@ int main(int argc, char *argv[]) {
 
 void serverSecureTunnel(){
 	int serverSocket, newSocket;
-	char buffer[1024];
 	struct sockaddr_in serverAddr;
 	struct sockaddr_storage serverStorage;
 	socklen_t addr_size;
 	char buffer[32];
 
 	if( (serverSocket = socket(AF_INET,SOCK_STREAM,0)) <0 )
-		err_exit("Couldn't make socket");
+		perror("Socket");
   
 	memset(&serverAddr, '\0', sizeof(serverAddr));
 	serverAddr.sin_family = AF_INET;
@@ -403,11 +407,11 @@ void serverSecureTunnel(){
 	read(newSocket, buffer, 32);
 	
 
-  return 0;
+  return;
 
 }
 
-void clientSecureTunnel(char * server){
+void clientSecureTunnel(char * ip){
 
 	int clientSocket;
     struct sockaddr_in server; 
@@ -419,14 +423,14 @@ void clientSecureTunnel(char * server){
 	}
     puts("Socket created");
      
-    server.sin_addr.s_addr = inet_addr(server);
+    server.sin_addr.s_addr = inet_addr(ip);
     server.sin_family = AF_INET;
     server.sin_port = htons( 4433 );
  
     //Connect to remote server
     if ( connect(clientSocket, (struct sockaddr *)&server , sizeof(server)) < 0){
         perror("Connect");
-        return 1;
+        return;
     }
 	
 	write(clientSocket, buffer, 32);
