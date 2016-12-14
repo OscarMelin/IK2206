@@ -361,6 +361,7 @@ int main(int argc, char *argv[]) {
     }
 	
     net_fd = sock_fd;
+	/*
 	int cpid = fork();
 	
 	if(cpid == 0){
@@ -374,8 +375,7 @@ int main(int argc, char *argv[]) {
 		printf("Impossible to start secure channel (fork)\n");
 		exit(-1);
 	}
-	sleep(10);
-	
+	*/
 	
   
 	/* use select() to handle two descriptors at once */
@@ -451,6 +451,9 @@ int main(int argc, char *argv[]) {
 			unsigned char decryptedtext[128];
 			int decryptedtext_len = decrypt(buffer, strlen(buffer), key, iv, decryptedtext);	
 
+			/* Add a NULL terminator. We are expecting printable text */
+  		decryptedtext[decryptedtext_len] = '\0';
+
 		  printf("Decrypted text is:\n");
 		  printf("%s\n", decryptedtext);  
 
@@ -492,11 +495,7 @@ void serverSecureTunnel(){
 		perror("Accept");
 	printf("Accepted\n");
 	int n =	recv(newSocket, buffer, 32, 0);
-	printf("received: %s  read %d bytes\n",buffer, n);
-	
-
-
-  exit(1);
+	printf("received: %s  read %d bytes\n",buffer, n);  
 
 }
 
