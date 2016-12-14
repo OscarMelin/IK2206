@@ -37,6 +37,7 @@
 #include <sys/time.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <openssl/aes.h>
 
 /* buffer for reading from tun/tap interface, must be >= 1500 */
 #define BUFSIZE 2000   
@@ -51,6 +52,8 @@
 
 void clientSecureTunnel(char * server);
 void serverSecureTunnel();
+void encrypt(char *text, unsigned char *key, unsigned char *iv, unsigned char *ciphertext);
+void decrypt(char *text, unsigned char *key, unsigned char *iv, unsigned char *ciphertext);
 
 int debug;
 char *progname;
@@ -201,6 +204,13 @@ int main(int argc, char *argv[]) {
 
   progname = argv[0];
   
+  /* KEY */
+  unsigned char key[] = {0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x99,0xAA,0xBB,0xCC,0xDD,0xEE,0xFF};
+  
+  /* IV */
+  unsigned char iv[AES_BLOCK_SIZE];
+  memset(iv, 0x00, AES_BLOCK_SIZE);
+  
   /* Check command line options */
   while((option = getopt(argc, argv, "i:s:c:p:uahd")) > 0){
     switch(option) {
@@ -340,7 +350,19 @@ int main(int argc, char *argv[]) {
 
       tap2net++;
       do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
-
+	  
+	  /* ENCRYPT */
+	  printf("buffer: %s\n",buffer);
+	  
+	unsigned char ciphertext[sizeof(buffer)];
+	  encrypt(buffer, key, iv, ciphertext);
+	  printf("encrypted: %s\n",ciphertext);
+	  
+	  
+	  decrypt(buffer, key, iv, ciphertext);
+	  printf("decrypted: %s\n",buffer);
+	  
+	  
       /* write length + packet */
       plength = nread;      	
 	  nwrite = cwrite(net_fd, (char *) &plength, sizeof(plength));
@@ -401,10 +423,11 @@ void serverSecureTunnel(){
 		perror("Listen");
 
 	addr_size = sizeof serverStorage;
-	if( newSocket = accept(serverSocket, (struct sockaddr *) &serverStorage, &addr_size) < 0)
+	if( (newSocket = accept(serverSocket, (struct sockaddr *) &serverStorage, &addr_size)) < 0)
 		perror("Accept");
-
-	read(newSocket, buffer, 32);
+	printf("Accepted\n");
+	int n =	recv(newSocket, buffer, 32, 0);
+printf("received: %s  read %d bytes\n",buffer, n);
 	
 
   return;
@@ -436,5 +459,23 @@ void clientSecureTunnel(char * ip){
 	write(clientSocket, buffer, 32);
 	
 }
+
+void encrypt(char *text, unsigned char *key, unsigned char *iv, unsigned char *ciphertext){
+	
+	AES_KEY enc_key;
+	AES_set_encrypt_key(key, sizeof(key)*8, &enc_key);
+	AES_cbc_encrypt(text, ciphertext, sizeof(text), &enc_key, iv, AES_ENCRYPT);
+	
+}
+
+void decrypt(char *text, unsigned char *key, unsigned char *iv, unsigned char *ciphertext){
+
+    AES_KEY dec_key;
+	memset(iv, 0x00, AES_BLOCK_SIZE); // don't forget to set iv vector again, else you can't decrypt data properly
+	AES_set_decrypt_key(key, sizeof(key)*8, &dec_key); // Size of key is in bits
+	AES_cbc_encrypt(ciphertext, text, sizeof(ciphertext), &dec_key, iv, AES_DECRYPT);
+
+}
+
 
 
