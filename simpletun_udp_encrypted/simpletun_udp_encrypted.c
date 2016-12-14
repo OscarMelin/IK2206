@@ -391,16 +391,16 @@ int main(int argc, char *argv[]) {
 			BIO_dump_fp (stdout, (const char *)buffer, nread);
 
 			/* ENCRYPT */
-			unsigned char ciphertext[128];
+			unsigned char ciphertext[BUFSIZE];
 			int ciphertext_len = encrypt (buffer, nread, key, iv, ciphertext);
-			printf("Ciphertext is:\n");
+			printf("Ciphertext is long: %d\n", ciphertext_len);
 			BIO_dump_fp (stdout, (const char *)ciphertext, ciphertext_len);
 	  
 	  
       /* write length + packet */
       plength = ciphertext_len;      	
 	  	nwrite = cwrite(net_fd, (char *) &plength, sizeof(plength));
-      nwrite = cwrite(net_fd, ciphertext, plength);
+      nwrite = cwrite(net_fd, ciphertext, ciphertext_len);
       
       do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
@@ -425,11 +425,8 @@ int main(int argc, char *argv[]) {
       do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
 	  
 		  /* ADD DECRYPT */ 
-			unsigned char decryptedtext[128];
-			int decryptedtext_len = decrypt(buffer, nread, key, iv, decryptedtext);	
-
-			/* Add a NULL terminator. We are expecting printable text */
-  		decryptedtext[decryptedtext_len] = '\0';
+			unsigned char decryptedtext[BUFSIZE];
+			int decryptedtext_len = decrypt(buffer, nread, key, iv, decryptedtext);
 
 		  printf("Decrypted text is:\n");
 		  printf("%s\n", decryptedtext);  
