@@ -461,6 +461,7 @@ int serverSecureTunnel(){
   struct sockaddr_in sa_serv;
   struct sockaddr_in sa_cli;
   size_t client_len;
+  char ipstr[INET6_ADDRSTRLEN];
 
 	/* Initiating TCP connection with a client */
 	if( (listen_sd = socket(AF_INET, SOCK_STREAM, 0)) <= 0) 
@@ -469,12 +470,12 @@ int serverSecureTunnel(){
   memset(&sa_serv, '\0', sizeof(sa_serv)); //Initialize sa_serv to 0's, sa_serv is socket info for our endpoint
   sa_serv.sin_family = AF_INET;
   sa_serv.sin_addr.s_addr = INADDR_ANY;
-  sa_serv.sin_port = htons(4433);          /* Server Port number */
+  sa_serv.sin_port = htons(44333);          /* Server Port number */
 
-  if( bind(listen_sd, (struct sockaddr *) &sa_serv, sizeof(sa_serv)) <= 0 )
+  if( bind(listen_sd, (struct sockaddr *) &sa_serv, sizeof(sa_serv)) < 0 )
 		perror("Bind");
 
-  if (listen(listen_sd, 5) <= 0 )
+  if (listen(listen_sd, 5) < 0 )
 		perror("Listen");
     
   printf("Server listening for incoming connections... \n");    
@@ -482,9 +483,11 @@ int serverSecureTunnel(){
   client_len = sizeof(sa_cli);
   if( (sd = accept(listen_sd, (struct sockaddr *) &sa_cli, (socklen_t *) &client_len)) < 0 )
 		perror("Accept");    
-  close(listen_sd); 
+  close(listen_sd);  // remember to delete this to change to multi client support
 
-  printf("Connection from %d, port %x\n", sa_cli.sin_addr.s_addr, sa_cli.sin_port);
+	void *addr = &(sa_cli.sin_addr);
+	inet_ntop(AF_INET, addr, ipstr, sizeof ipstr);
+  printf("Connection from %s, port %d\n", ipstr, ntohs(sa_cli.sin_port));
 
 	/* Starting SSL part */
 	SSL_load_error_strings();    
@@ -567,7 +570,7 @@ int clientSecureTunnel(char * ip){
   int sd;
   struct sockaddr_in sa;
   SSL_METHOD *meth;
-	
+  char ipstr[INET6_ADDRSTRLEN];	
 
 	/* Starting TCP connection to server */
 	if( (sd = socket(AF_INET, SOCK_STREAM, 0)) < 0 )
@@ -576,11 +579,14 @@ int clientSecureTunnel(char * ip){
   memset(&sa, '\0', sizeof(sa));
   sa.sin_family = AF_INET;
   sa.sin_addr.s_addr = inet_addr(ip);  
-  sa.sin_port = htons(4433);         
+  sa.sin_port = htons(44333);         
 
 	if( connect(sd, (struct sockaddr *) &sa,sizeof(sa)) < 0 )
 		perror("Connect");
-  printf("Connected to %d, port %d\n", sa.sin_addr.s_addr, ntohs(sa.sin_port));
+
+	void *addr = &(sa.sin_addr);
+	inet_ntop(AF_INET, addr, ipstr, sizeof ipstr);
+  printf("Connected to %s, port %d\n", ipstr, ntohs(sa.sin_port));
 
 	/* Start SSL part */
 	SSLeay_add_ssl_algorithms();
