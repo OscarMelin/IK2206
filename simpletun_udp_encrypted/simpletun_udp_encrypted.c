@@ -462,12 +462,37 @@ int serverSecureTunnel(){
   struct sockaddr_in sa_cli;
   size_t client_len;
 
+	/* Initiating TCP connection with a client */
+	if( (listen_sd = socket(AF_INET, SOCK_STREAM, 0)) <= 0) 
+		perror("Listen");
+
+  memset(&sa_serv, '\0', sizeof(sa_serv)); //Initialize sa_serv to 0's, sa_serv is socket info for our endpoint
+  sa_serv.sin_family = AF_INET;
+  sa_serv.sin_addr.s_addr = INADDR_ANY;
+  sa_serv.sin_port = htons(4433);          /* Server Port number */
+
+  if( bind(listen_sd, (struct sockaddr *) &sa_serv, sizeof(sa_serv)) <= 0 )
+		perror("Bind");
+
+  if (listen(listen_sd, 5) <= 0 )
+		perror("Listen");
+    
+  printf("Server listening for incoming connections... \n");    
+
+  client_len = sizeof(sa_cli);
+  if( (sd = accept(listen_sd, (struct sockaddr *) &sa_cli, (socklen_t *) &client_len)) < 0 )
+		perror("Accept");    
+  close(listen_sd); 
+
+  printf("Connection from %d, port %x\n", sa_cli.sin_addr.s_addr, sa_cli.sin_port);
+
+	/* Starting SSL part */
 	SSL_load_error_strings();    
   SSLeay_add_ssl_algorithms();
   meth = (SSL_METHOD *) SSLv23_server_method();
 
 	ctx = SSL_CTX_new(meth);
-  if (!ctx) {
+  if (ctx == NULL) {
       ERR_print_errors_fp(stdout);
       exit(2);
   }
@@ -487,32 +512,7 @@ int serverSecureTunnel(){
       fprintf(stdout, "Private key does not match the certificate public key\n");
       exit(5);
   }
-
-
-
-	if( (listen_sd = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
-		perror("Listen");
-
-  memset(&sa_serv, '\0', sizeof(sa_serv)); //Initialize sa_serv to 0's, sa_serv is socket info for our endpoint
-  sa_serv.sin_family = AF_INET;
-  sa_serv.sin_addr.s_addr = INADDR_ANY;
-  sa_serv.sin_port = htons(4433);          /* Server Port number */
-
-  if( bind(listen_sd, (struct sockaddr *) &sa_serv, sizeof(sa_serv)) < 0 )
-		perror("Bind");
-
-
-  if (listen(listen_sd, 5) < 0 )
-		perror("Listen");
-    
-  client_len = sizeof(sa_cli);
-  printf("Server listening for incoming connections.. \n");    
-
-  if( (sd = accept(listen_sd, (struct sockaddr *) &sa_cli, (socklen_t *) &client_len)) < 0 )
-		perror("Accept");    
-  close(listen_sd); 
-
-  printf("Connection from %d, port %x\n", sa_cli.sin_addr.s_addr, sa_cli.sin_port);
+	
 
 	if( (ssl = SSL_new(ctx)) == NULL){
 		printf("SSL context was NULL\n");
@@ -520,7 +520,7 @@ int serverSecureTunnel(){
 	}
 
 	SSL_set_fd(ssl, sd);
-
+	printf("SSL accept waiting...\n");
 	if(  (err = SSL_accept(ssl)) < 0 ){
 		printf("SSL accept failed\n");
 	 	exit(2); 
@@ -567,17 +567,29 @@ int clientSecureTunnel(char * ip){
   int sd;
   struct sockaddr_in sa;
   SSL_METHOD *meth;
+	
 
+	/* Starting TCP connection to server */
+	if( (sd = socket(AF_INET, SOCK_STREAM, 0)) < 0 )
+		perror("Socket");
+    
+  memset(&sa, '\0', sizeof(sa));
+  sa.sin_family = AF_INET;
+  sa.sin_addr.s_addr = inet_addr(ip);  
+  sa.sin_port = htons(4433);         
 
+	if( connect(sd, (struct sockaddr *) &sa,sizeof(sa)) < 0 )
+		perror("Connect");
+  printf("Connected to %d, port %d\n", sa.sin_addr.s_addr, ntohs(sa.sin_port));
+
+	/* Start SSL part */
 	SSLeay_add_ssl_algorithms();
   meth = (SSL_METHOD *) SSLv23_client_method();
   SSL_load_error_strings();
   if( (ctx = SSL_CTX_new(meth)) == NULL){
 		printf("SSL context was NULL\n");
 		exit(1);
-	}
-
-	
+	}	
 
 	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
   SSL_CTX_load_verify_locations(ctx, CACERT, NULL);
@@ -593,38 +605,25 @@ int clientSecureTunnel(char * ip){
   if (!SSL_CTX_check_private_key(ctx)) {
       printf("Private key does not match the certificate public key \n");
       exit(-4);
-  }
-
-
-	if( (sd = socket(AF_INET, SOCK_STREAM, 0) < 0) )
-		perror("Socket");
-
-    
-  memset(&sa, '\0', sizeof(sa));
-  sa.sin_family = AF_INET;
-  sa.sin_addr.s_addr = inet_addr(ip);  
-  sa.sin_port = htons(atoi("443"));         
-
-	if( connect(sd, (struct sockaddr *) &sa,sizeof(sa)) < 0 )
-		perror("Connect");
+  }	
 
 	if( (ssl = SSL_new(ctx)) == NULL){
 		printf("SSL variable is NULL\n");
 	}
     
   SSL_set_fd(ssl, sd);
-    
-	if(SSL_connect(ssl) < 0){
-		printf("SSL connect failed\n");
+  
+	if((err = SSL_connect(ssl)) == 0){
+		printf("SSL_connect faild: %d\n", err);
 		exit(-1);
 	}
 
   printf("SSL connection using %s\n", SSL_get_cipher (ssl));
-    /* Get server's certificate (note: beware of dynamic allocation) - opt */
+  /* Get server's certificate (note: beware of dynamic allocation) - opt */
 
   server_cert = SSL_get_peer_certificate(ssl);
   if (server_cert != NULL) {
-      printf("Client certificate:\n");
+      printf("Server certificate:\n");
 
 			if( (str = X509_NAME_oneline(X509_get_subject_name(server_cert), 0, 0)) == NULL){
 				printf("Subject name was NULL\n");
