@@ -318,7 +318,7 @@ int main(int argc, char *argv[]) {
   memset(&remote, 0, sizeof(remote));
   remote.sin_family = AF_INET;
   remote.sin_addr.s_addr = inet_addr(remote_ip);
-  remote.sin_port = htons(port);
+  remote.sin_port = htons(port+1);
 	
 	if(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&optval, sizeof(optval)) < 0){
     perror("setsockopt()");
@@ -381,38 +381,41 @@ int main(int argc, char *argv[]) {
 
     if(FD_ISSET(tap_fd, &rd_set)){
       /* data from tun/tap: just read it and write it to the network */
-			printf("tap_fd\n");
       
       nread = cread(tap_fd, buffer, BUFSIZE);
 
       tap2net++;
       do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
-	  
-			BIO_dump_fp (stdout, (const char *)buffer, nread);
+			
+	  	do_debug("Plaintext is:%s\n", buffer);
+			//BIO_dump_fp (stdout, (const char *)buffer, nread);
 
 			/* ENCRYPT */
 			unsigned char ciphertext[BUFSIZE];
 			int ciphertext_len = encrypt (buffer, nread, key, iv, ciphertext);
 			printf("Ciphertext is long: %d\n", ciphertext_len);
-			BIO_dump_fp (stdout, (const char *)ciphertext, ciphertext_len);
+			do_debug("Encrypted text is:%s\n", ciphertext);
+			//BIO_dump_fp (stdout, ciphertext, ciphertext_len);
+			/*********************************************/
 
 			/* Adding MAC */
-			unsigned char *mac = HMAC(EVP_sha256(), key, 32, ciphertext, ciphertext_len, NULL, NULL);
+			unsigned char *mac = (unsigned char*) HMAC(EVP_sha256(), key, 32, ciphertext, ciphertext_len, NULL, NULL);
 
       int newLen = 32 + ciphertext_len;
       unsigned char newPacket[newLen];
-      int i;
-      for (i = 0; i < 32; i++) {
+      int i, j
+;
+      for (i = 0; i < 32; i++) 
           newPacket[i] = mac[i];
-      }
-      int j = 0;
-      for (i = 32; i < msg_len; i++) {
+      
+
+      for (i = 32, j = 0; i < plength; i++, j++)
           newPacket[i] = ciphertext[j];
-          j++;
-      }	  
+      
+			/***********************************************/
 	  
       /* write length + packet */
-      plength = newLen;      	
+      plength = newLen;
 	  	nwrite = cwrite(net_fd, (char *) &plength, sizeof(plength));
       nwrite = cwrite(net_fd, newPacket, plength);
       
@@ -422,7 +425,7 @@ int main(int argc, char *argv[]) {
     if(FD_ISSET(net_fd, &rd_set)){
       /* data from the network: read it, and write it to the tun/tap interface. 
        * We need to read the length first, and then the packet */
-			printf("net_fd\n");
+//			printf("net_fd\n");
 	   
       /* Read length */      
       nread = read_n(net_fd, (char *) &plength, sizeof(plength));
@@ -437,45 +440,64 @@ int main(int argc, char *argv[]) {
       nread = read_n(net_fd, buffer, plength);
       do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
 
-			/* Checking MAC */
-			int i, j;
-			unsigned char mac[32];
-			unsigned char ciphertext[plength-32];
+			if(nread > 32){
+				/* Checking MAC */
+				int i, j, len = nread -32;
+				unsigned char mac[32];
+				unsigned char ciphertext[len];
+				memset(mac, '\0', 32);
+				memset(ciphertext, '\0', len);
 
-			for(i = 32, j = 0; i < plength; i++, j++)
-				ciphertext[j] = buffer[i];			
-			strncpy(mac, buffer, 32);
+				for (i = 0; i < 32; i++)
+		        mac[i] = buffer[i];
+		    
+				for(i = 32, j = 0; i < plength; i++, j++)
+					ciphertext[j] = buffer[i];
 
-			unsigned char compareMac = HMAC(EVP_sha256(), key, 32, ciphertext, plength-32, NULL, NULL);
+				unsigned char *compareMac = (unsigned char*) HMAC(EVP_sha256(), key, 32, ciphertext, len, NULL, NULL);
 
-			int different = 0;			
-			for(i = 0; i < 32; i++){
-				if( mac[i] != compareMac[i]){
-					different = 1;
-					break;
+				int different = 0;			
+				for(i = 0; i < 32; i++){
+					if( *(compareMac+i) != mac[i]){
+						different = 1;
+						break;
+					}
 				}
-			}
-			if(different){
-					printf("MACs doesn't match\n");
-					BIO_dump_fp (stdout, (const char *)mac, 32);
-					continue;
-			}
-		  else	printf("MAC verified correctly\n");
-			
-	  
-		  /* DECRYPT */ 
-			unsigned char decryptedtext[BUFSIZE];
-			int decryptedtext_len = decrypt(buffer, nread, key, iv, decryptedtext);
+				if(different){
+						printf("MACs doesn't match\n");
+						//BIO_dump_fp (stdout, (const char *)mac, 32);
+						//BIO_dump_fp (stdout, (const char *)compareMac, 32);
+						do_debug("Original Mac: %s\n", mac);
+						do_debug("New Mac     : %s\n", compareMac);
+						continue;
+				}else	{
+					printf("MAC verified correctly\n");
+					/* DECRYPT */ 
+					unsigned char decryptedtext[BUFSIZE];
+					int decryptedtext_len = decrypt(ciphertext, len, key, iv, decryptedtext);
 
-		  printf("Decrypted text is:\n");
-		  printf("%s\n", decryptedtext);  
+					do_debug("Decrypted text is:%s\n", decryptedtext);
 
-      /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
-      nwrite = cwrite(tap_fd, decryptedtext, decryptedtext_len);
-      do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
+				  /* Writing decrypted text to tunnel */
+				  nwrite = cwrite(tap_fd, decryptedtext, decryptedtext_len);
+				  do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
+				}
+			/**********************************************/
+	  	}else{
+				/* DECRYPT */ 
+				unsigned char decryptedtext[BUFSIZE];
+				int decryptedtext_len = decrypt(buffer, nread, key, iv, decryptedtext);
+
+				do_debug("Decrypted text is:%s\n", decryptedtext);
+
+		    /* Writing decrypted text to tunnel */
+		    nwrite = cwrite(tap_fd, decryptedtext, decryptedtext_len);
+		    do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
+
+			}
+		  
     }
-		EVP_cleanup();
-  	ERR_free_strings();
+
   }
   
   return(0);
