@@ -177,7 +177,7 @@ void usage(void) {
 unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
   
 /* IV */
-unsigned char *iv = (unsigned char *)"01234567890123456";
+unsigned char *iv = (unsigned char *)"0123456789012345";
 
 int main(int argc, char *argv[]) {
 
@@ -441,7 +441,7 @@ int main(int argc, char *argv[]) {
 
 #define CERTF "server.crt"
 #define KEYF "server.key"
-#define CACERT "ca.crt"
+#define CACERT "crt"
 
 #define CLCERTF "client.crt"
 #define CLKEYF "client.key"
@@ -471,6 +471,12 @@ int serverSecureTunnel(){
   sa_serv.sin_family = AF_INET;
   sa_serv.sin_addr.s_addr = INADDR_ANY;
   sa_serv.sin_port = htons(44333);          /* Server Port number */
+
+	int enable = 1;
+	if(setsockopt(listen_sd, SOL_SOCKET, SO_REUSEADDR, (char*)&enable, sizeof(enable)) < 0){
+    perror("setsockopt()");
+    exit(1);
+  }  	
 
   if( bind(listen_sd, (struct sockaddr *) &sa_serv, sizeof(sa_serv)) < 0 )
 		perror("Bind");
@@ -547,7 +553,7 @@ int serverSecureTunnel(){
 				exit(4);
 			}
 
-      printf("\t issuer: %s\n", str);
+      printf("\t issuer : %s\n", str);
       OPENSSL_free (str);
 
       /* We could do all sorts of certificate verification stuff here before
@@ -556,6 +562,21 @@ int serverSecureTunnel(){
       X509_free(client_cert); //Frees the datastructure holding the client cert
   } else
       printf("Client does not have certificate.\n");
+
+	unsigned char randomBytes[49];
+	memset(randomBytes, '\0', 48);
+	if (!RAND_bytes(randomBytes, sizeof randomBytes)) {
+		printf("Impossible to generate random number to send to client\n");
+		exit(-3);	
+	}
+	
+	if((err = SSL_write(ssl, randomBytes, 48)) <= 0){
+		printf("Impossible to send RGN to client\n");
+		exit(-4);
+	}
+	randomBytes[49] = '\0';
+	printf("RGN: %s\n", randomBytes);
+	
 
 }
 
@@ -654,7 +675,24 @@ int clientSecureTunnel(char * ip){
       printf("Server does not have certificate.\n");
 		  
 	X509_free(server_cert); //Frees the datastructure holding the client cert
-	
+
+
+
+	unsigned char randomBytes[49];
+	if((err = SSL_read(ssl, randomBytes, 48)) <= 0){
+		printf("Impossible to read RGN to client\n");
+		exit(-4);
+	}
+	randomBytes[49] = '\0';
+	printf("RGN: %s\n", randomBytes);
+
+	int i, j;
+	for (i = 0; i < 32; i++) 
+  	key[i] = randomBytes[i];
+  
+  for (i = 32, j = 0; i < 48; i++, j++) 
+ 		iv[j] = randomBytes[i];  
+
 }
 
 int encrypt(unsigned char *plaintext, int plaintext_len, unsigned char *key,
