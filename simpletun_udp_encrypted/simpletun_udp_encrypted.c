@@ -17,6 +17,8 @@
 #include <openssl/conf.h>
 #include <openssl/evp.h>
 #include <openssl/err.h>
+#include <openssl/bio.h>
+#include <openssl/ssl.h>
 
 /* buffer for reading from tun/tap interface, must be >= 1500 */
 #define BUFSIZE 2000   
@@ -336,21 +338,14 @@ int main(int argc, char *argv[]) {
   }
 
   net_fd = sock_fd;
-	/*
-	int cpid = fork();
 	
-	if(cpid == 0){
-		if(cliserv == SERVER){		
-			serverSecureTunnel();
-		}
-		else {
-			clientSecureTunnel(remote_ip);
-		}
-	}else if (cpid < 0){
-		printf("Impossible to start secure channel (fork)\n");
-		exit(-1);
+	if(cliserv == SERVER){		
+		serverSecureTunnel();
 	}
-	*/
+	else {
+		clientSecureTunnel(remote_ip);
+	}
+	
 	
   
 	/* use select() to handle two descriptors at once */
@@ -426,7 +421,6 @@ int main(int argc, char *argv[]) {
            /* ctrl-c at the other end */
             break;
       }
-			printf("NET2TAP: Length read: %d\n", plength);
       net2tap++;
 
       /* read packet */
@@ -518,7 +512,10 @@ void serverSecureTunnel(){
 		perror("Accept");
 	printf("Accepted\n");
 	int n =	recv(newSocket, buffer, 32, 0);
-	printf("received: %s  read %d bytes\n",buffer, n);  
+	printf("received: %s  read %d bytes\n",buffer, n);
+
+	
+
 
 }
 
@@ -545,7 +542,7 @@ void clientSecureTunnel(char * ip){
     }
 	
 	write(clientSocket, buffer, 32);
-	
+
 }
 
 int encrypt(unsigned char *plaintext, int plaintext_len, unsigned char *key,
