@@ -439,253 +439,176 @@ int main(int argc, char *argv[]) {
   return(0);
 }
 
+#define CERTF "server.crt"
+#define KEYF "server.key"
+#define CACERT "ca.crt"
+
+#define CLCERTF "client.crt"
+#define CLKEYF "client.key"
+#define CLCACERT "ca.crt"
 
 int serverSecureTunnel(){
-	int serverSocket, newSocket;
-	struct sockaddr_in serverAddr;
-	struct sockaddr_storage serverStorage;
-	socklen_t addr_size;
-	char buffer[32];
-
-	if( (serverSocket = socket(AF_INET,SOCK_STREAM,0)) <0 )
-		perror("Socket");
-  
-	memset(&serverAddr, '\0', sizeof(serverAddr));
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_port = htons(4433);
-	serverAddr.sin_addr.s_addr = INADDR_ANY;
-
-	if( bind(serverSocket,(struct sockaddr *)&serverAddr,sizeof(serverAddr)) <0 )
-      perror("Couldn't bind");
-
-	if(listen(serverSocket,5)==0)
-		printf("Listening\n");
-	else
-		perror("Listen");
-
-	addr_size = sizeof serverStorage;
-	if( (newSocket = accept(serverSocket, (struct sockaddr *) &serverStorage, &addr_size)) < 0)
-		perror("Accept");
-	printf("Accepted\n");
-	int n =	recv(newSocket, buffer, 32, 0);
-	printf("received: %s  read %d bytes\n",buffer, n);
-
-	printf("Starting SSL handshake...\n");
-	/* START SSL STUFF */
-
-	BIO *sbio, *bbio, *acpt, *out;
-  int len;
-  char number[10];
-  char tmpbuf[257];
-  char *ciphertext;
+	unsigned char bytestream[48]; //256 bit key + 128 bit IV to be used for AES256
+  unsigned char tmpbuf[100];
   SSL_CTX *ctx;
   SSL *ssl;
+  X509 *client_cert;
+  char *str;
+  SSL_METHOD *meth;
+  int err;
+  int listen_sd;
+  int sd;
+  struct sockaddr_in sa_serv;
+  struct sockaddr_in sa_cli;
+  size_t client_len;
 
-  ERR_load_crypto_strings();
-  ERR_load_SSL_strings();
-  OpenSSL_add_all_algorithms();
+	SSL_load_error_strings();    
+  SSLeay_add_ssl_algorithms();
+  meth = (SSL_METHOD *) SSLv23_server_method();
 
-  /* Might seed PRNG here */
-
-  ctx = SSL_CTX_new(SSLv23_server_method());
-
-  if (!SSL_CTX_use_certificate_file(ctx,"host.cert",SSL_FILETYPE_PEM)
-      || !SSL_CTX_use_PrivateKey_file(ctx,"host.key",SSL_FILETYPE_PEM)
-      || !SSL_CTX_check_private_key(ctx)) {
-        fprintf(stderr, "Error setting up SSL_CTX\n");
-        ERR_print_errors_fp(stderr);
-        return(0);
+	ctx = SSL_CTX_new(meth);
+  if (!ctx) {
+      ERR_print_errors_fp(stderr);
+      exit(2);
   }
 
-  /* Might do other things here like setting verify locations and
-   * DH and/or RSA temporary key callbacks
-   */
+	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+  SSL_CTX_load_verify_locations(ctx, CACERT, NULL);
 
-  /* New SSL BIO setup as server */
-  sbio=BIO_new_ssl(ctx,0);
-
-  BIO_get_ssl(sbio, &ssl);
-
-  if(!ssl) {
-    fprintf(stderr, "Can't locate SSL pointer\n");
-  /* whatever ... */
+  if (SSL_CTX_use_certificate_file(ctx, CERTF, SSL_FILETYPE_PEM) <= 0) {
+      ERR_print_errors_fp(stderr);
+      exit(3);
+  }
+  if (SSL_CTX_use_PrivateKey_file(ctx, KEYF, SSL_FILETYPE_PEM) <= 0) {
+      ERR_print_errors_fp(stderr);
+      exit(4);
+  }
+  if (!SSL_CTX_check_private_key(ctx)) {
+      fprintf(stderr, "Private key does not match the certificate public key\n");
+      exit(5);
   }
 
-  /* Don't want any retries */
-  SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY);
 
-  /* Create the buffering BIO */
 
-  bbio = BIO_new(BIO_f_buffer());
+	listen_sd = socket(AF_INET, SOCK_STREAM, 0);
 
-  /* Add to chain */
-  sbio = BIO_push(bbio, sbio);
+  memset(&sa_serv, '\0', sizeof(sa_serv)); //Initialize sa_serv to 0's, sa_serv is socket info for our endpoint
+  sa_serv.sin_family = AF_INET;
+  sa_serv.sin_addr.s_addr = INADDR_ANY;
+  sa_serv.sin_port = htons(4433);          /* Server Port number */
 
-  acpt=BIO_new_accept("4433");
+  err = bind(listen_sd, (struct sockaddr *) &sa_serv,               sizeof(sa_serv));
 
-  /* By doing this when a new connection is established
-   * we automatically have sbio inserted into it. The
-   * BIO chain is now 'swallowed' by the accept BIO and
-   * will be freed when the accept BIO is freed.
-   */
 
-  BIO_set_accept_bios(acpt,sbio);
+  err = listen(listen_sd, 5);
+    
+  client_len = sizeof(sa_cli);
+  printf("Server listening for incoming connections.. \n");    
 
-  /* Setup accept BIO */
-  printf("Setting up the accept BIO... ");
-  if(BIO_do_accept(acpt) <= 0) {
-    fprintf(stderr, "Error setting up accept BIO\n");
-    ERR_print_errors_fp(stderr);
-    return(0);
-  }
-  printf("SUCCESS!\n");
+  sd = accept(listen_sd, (struct sockaddr *) &sa_cli, (socklen_t *) &client_len);
+    
+  close(listen_sd); //Not gonna listen for any more connections
+  printf("Connection from %d, port %x\n", sa_cli.sin_addr.s_addr, sa_cli.sin_port);
 
-  /* Now wait for incoming connection */
-  printf("Setting up the incoming connection... ");
-  if(BIO_do_accept(acpt) <= 0) {
-    fprintf(stderr, "Error in connection\n");
-    ERR_print_errors_fp(stderr);
-    return(0);
-  }
-  printf("SUCCESS!\n");
+	ssl = SSL_new(ctx);
+	SSL_set_fd(ssl, sd);
+  err = SSL_accept(ssl);
 
-  /* We only want one connection so remove and free
-   * accept BIO
-   */
+ 	printf("SSL connection using %s\n", SSL_get_cipher (ssl));
 
-  sbio = BIO_pop(acpt);
 
-  BIO_free_all(acpt);
+	client_cert = SSL_get_peer_certificate(ssl);
+  if (client_cert != NULL) {
+      printf("Client certificate:\n");
 
-  // wait for ssl handshake from the client
-  printf("Waiting for SSL handshake...");
-  if(BIO_do_handshake(sbio) <= 0) {
-    fprintf(stderr, "Error in SSL handshake\n");
-    ERR_print_errors_fp(stderr);
-    return(0);
-  }
-  printf("SUCCESS!\n");
-  
-  // generate the random number for the challenge
-  srand((unsigned)time(NULL));
-  sprintf(number,"%d", rand());
-  
-  // send the random number to the client
-  printf("Sending the random number challenge to the client. Number is %s... ", number);
-  if(BIO_write(sbio, number, strlen(number)) <= 0) {
-    fprintf(stderr, "Error in sending random number\n");
-    ERR_print_errors_fp(stderr);
-    exit(1);
-  }
-  printf("SUCCESS!\n");
+      str = X509_NAME_oneline(X509_get_subject_name(client_cert), 0, 0);
+      printf("\t subject: %s\n", str);
+      OPENSSL_free (str);
 
-  BIO_flush(sbio);
+      str = X509_NAME_oneline(X509_get_issuer_name(client_cert), 0, 0);
 
+      printf("\t issuer: %s\n", str);
+      OPENSSL_free (str);
+
+      /* We could do all sorts of certificate verification stuff here before
+         deallocating the certificate. */
+
+      X509_free(client_cert); //Frees the datastructure holding the client cert
+  } else
+      printf("Client does not have certificate.\n");
 
 }
 
 int clientSecureTunnel(char * ip){
-
-	int clientSocket;
-    struct sockaddr_in server; 
-	char buffer[32] = "Hello world\n";
-     
-    if( (clientSocket = socket(AF_INET , SOCK_STREAM , 0)) < 0){
-		perror("Socket");    
-		return ;
-	}
-    puts("Socket created");
-     
-    server.sin_addr.s_addr = inet_addr(ip);
-    server.sin_family = AF_INET;
-    server.sin_port = htons( 4433 );
- 
-    //Connect to remote server
-    if ( connect(clientSocket, (struct sockaddr *)&server , sizeof(server)) < 0){
-        perror("Connect");
-        return;
-    }
-	
-	write(clientSocket, buffer, 32);
-
-	printf("Starting SSL stuff\n");
-	/* STARTING SSL STUFF */
-	BIO *sbio, *bbio, *acpt, *out;
-  int len;
-  char number[10];
-  char tmpbuf[257];
-  char *ciphertext;
+	unsigned char bytestream[48]; //256 bit key + 128 bit IV to be used for AES256
+  unsigned char tmpbuf[100];
   SSL_CTX *ctx;
   SSL *ssl;
+  X509 *server_cert;
+  char *str;
+  int err;
+  int sd;
+  struct sockaddr_in sa;
+  SSL_METHOD *meth;
 
 
-// initialize the libraries
-  ERR_load_crypto_strings();
-  ERR_load_SSL_strings();
-  OpenSSL_add_all_algorithms();
+	SSLeay_add_ssl_algorithms();
+  meth = (SSL_METHOD *) SSLv23_client_method();
+  SSL_load_error_strings();
+  ctx = SSL_CTX_new(meth);
+	
 
-  /* We would seed the PRNG here if the platform didn't
-   * do it automatically
-   */
-
-  ctx = SSL_CTX_new(SSLv23_client_method());
-
-  /* We'd normally set some stuff like the verify paths and
-   * mode here because as things stand this will connect to
-   * any server whose certificate is signed by any CA.
-   */
-
-  sbio = BIO_new_ssl_connect(ctx);
-
-  BIO_get_ssl(sbio, &ssl);
-
-  if(!ssl) {
-   fprintf(stderr, "Can't locate SSL pointer\n");
-   /* whatever ... */
+	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+  SSL_CTX_load_verify_locations(ctx, CACERT, NULL);
+  if (SSL_CTX_use_certificate_file(ctx, CLCERTF, SSL_FILETYPE_PEM) <= 0) {
+      ERR_print_errors_fp(stderr);
+      exit(-2);
   }
 
-  /* Don't want any retries */
-  SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY);
-  /* We might want to do other things with ssl here */
-   
-  // set connection parameters
-  BIO_set_conn_hostname(sbio, ip);
-  BIO_set_conn_port(sbio, "443");
- 
-  // create a buffer to print to the screen
-  //out = BIO_new_fp(stdout, BIO_NOCLOSE);
-
-  // establish a connection to the server
-  printf("Attempting to to connect to the server... ");
-  if (BIO_do_connect(sbio) <= 0) {
-    fprintf(stderr, "Error connecting to server\n");
-    ERR_print_errors_fp(stderr);
-    BIO_free_all(sbio);
-    BIO_free(out);
-    SSL_CTX_free(ctx);
-    exit(1);
+  if (SSL_CTX_use_PrivateKey_file(ctx, CLKEYF, SSL_FILETYPE_PEM) <= 0) {
+      ERR_print_errors_fp(stderr);
+      exit(-3);
   }
-  printf("SUCCESS!\n");
-
-  // initiate the handshake with the server
-  printf("Initiating SSL handshake with the server... ");
-  if (BIO_do_handshake(sbio) <= 0) {
-    fprintf(stderr, "Error establishing SSL connection\n");
-    ERR_print_errors_fp(stderr);
-    BIO_free_all(sbio);
-    BIO_free(out);
-    SSL_CTX_free(ctx);
-    exit(1);
+  if (!SSL_CTX_check_private_key(ctx)) {
+      printf("Private key does not match the certificate public key \n");
+      exit(-4);
   }
-  printf("SUCCESS!\n");
 
-  // Get the random number from the server
-  printf("Waiting for random number from server... ");
-  memset(tmpbuf, '\0', 11);
-  memset(number, '\0', 11);
-  len = BIO_read(sbio, tmpbuf, 10);
-  strcpy(number, tmpbuf);
-  printf("SUCCESS!\nRandom number is: %s\n", number);
+
+	sd = socket(AF_INET, SOCK_STREAM, 0);
+
+    
+  memset(&sa, '\0', sizeof(sa));
+  sa.sin_family = AF_INET;
+  sa.sin_addr.s_addr = inet_addr(ip);  
+  sa.sin_port = htons(atoi("443"));         
+
+	err = connect(sd, (struct sockaddr *) &sa,sizeof(sa));
+
+	ssl = SSL_new(ctx);
+    
+  SSL_set_fd(ssl, sd);
+    
+  err = SSL_connect(ssl);   
+
+  printf("SSL connection using %s\n", SSL_get_cipher (ssl));
+    /* Get server's certificate (note: beware of dynamic allocation) - opt */
+
+  server_cert = SSL_get_peer_certificate(ssl);
+    
+  printf("Server certificate:\n");
+
+  str = X509_NAME_oneline(X509_get_subject_name(server_cert), 0, 0);
+    
+  printf("\t subject: %s\n", str);
+  OPENSSL_free (str);
+
+  str = X509_NAME_oneline(X509_get_issuer_name(server_cert), 0, 0);
+  printf("\t issuer: %s\n", str);
+
+
+  X509_free(server_cert);
+
 	
 }
 
