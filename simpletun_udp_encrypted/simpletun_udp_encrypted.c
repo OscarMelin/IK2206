@@ -31,8 +31,8 @@
 #define ETH_HDR_LEN 14
 #define ARP_PKT_LEN 28
 
-void clientSecureTunnel(char * server);
-void serverSecureTunnel();
+int clientSecureTunnel(char * server);
+int serverSecureTunnel();
 int encrypt(unsigned char *plaintext, int plaintext_len, unsigned char *key,
   unsigned char *iv, unsigned char *ciphertext);
 int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *key,
@@ -178,50 +178,6 @@ unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
   
 /* IV */
 unsigned char *iv = (unsigned char *)"01234567890123456";
-
-void test();
-void test(){
-
-unsigned char *plaintext =
-                (unsigned char *)"The quick brown fox jumps over the lazy dog";
-	unsigned char ciphertext[128];
-
-  /* Buffer for the decrypted text */
-  unsigned char decryptedtext[128];
-
-  int decryptedtext_len, ciphertext_len;
-
-  /* Initialise the library */
-  ERR_load_crypto_strings();
-  OpenSSL_add_all_algorithms();
-  OPENSSL_config(NULL);
-
-  /* Encrypt the plaintext */
-  ciphertext_len = encrypt (plaintext, strlen ((char *)plaintext), key, iv,
-                            ciphertext);
-
-  /* Do something useful with the ciphertext here */
-  printf("Ciphertext is:\n");
-  BIO_dump_fp (stdout, (const char *)ciphertext, ciphertext_len);
-
-  /* Decrypt the ciphertext */
-  decryptedtext_len = decrypt(ciphertext, ciphertext_len, key, iv,
-    decryptedtext);
-
-  /* Add a NULL terminator. We are expecting printable text */
-  decryptedtext[decryptedtext_len] = '\0';
-
-  /* Show the decrypted text */
-  printf("Decrypted text is:\n");
-  printf("%s\n", decryptedtext);
-
-  /* Clean up */
-  EVP_cleanup();
-  ERR_free_strings();
-
-  return;
-
-}
 
 int main(int argc, char *argv[]) {
 
@@ -484,7 +440,7 @@ int main(int argc, char *argv[]) {
 }
 
 
-void serverSecureTunnel(){
+int serverSecureTunnel(){
 	int serverSocket, newSocket;
 	struct sockaddr_in serverAddr;
 	struct sockaddr_storage serverStorage;
@@ -514,12 +470,121 @@ void serverSecureTunnel(){
 	int n =	recv(newSocket, buffer, 32, 0);
 	printf("received: %s  read %d bytes\n",buffer, n);
 
-	
+	printf("Starting SSL handshake...\n");
+	/* START SSL STUFF */
+
+	BIO *sbio, *bbio, *acpt, *out;
+  int len;
+  char number[10];
+  char tmpbuf[257];
+  char *ciphertext;
+  SSL_CTX *ctx;
+  SSL *ssl;
+
+  ERR_load_crypto_strings();
+  ERR_load_SSL_strings();
+  OpenSSL_add_all_algorithms();
+
+  /* Might seed PRNG here */
+
+  ctx = SSL_CTX_new(SSLv23_server_method());
+
+  if (!SSL_CTX_use_certificate_file(ctx,"host.cert",SSL_FILETYPE_PEM)
+      || !SSL_CTX_use_PrivateKey_file(ctx,"host.key",SSL_FILETYPE_PEM)
+      || !SSL_CTX_check_private_key(ctx)) {
+        fprintf(stderr, "Error setting up SSL_CTX\n");
+        ERR_print_errors_fp(stderr);
+        return(0);
+  }
+
+  /* Might do other things here like setting verify locations and
+   * DH and/or RSA temporary key callbacks
+   */
+
+  /* New SSL BIO setup as server */
+  sbio=BIO_new_ssl(ctx,0);
+
+  BIO_get_ssl(sbio, &ssl);
+
+  if(!ssl) {
+    fprintf(stderr, "Can't locate SSL pointer\n");
+  /* whatever ... */
+  }
+
+  /* Don't want any retries */
+  SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY);
+
+  /* Create the buffering BIO */
+
+  bbio = BIO_new(BIO_f_buffer());
+
+  /* Add to chain */
+  sbio = BIO_push(bbio, sbio);
+
+  acpt=BIO_new_accept("4433");
+
+  /* By doing this when a new connection is established
+   * we automatically have sbio inserted into it. The
+   * BIO chain is now 'swallowed' by the accept BIO and
+   * will be freed when the accept BIO is freed.
+   */
+
+  BIO_set_accept_bios(acpt,sbio);
+
+  /* Setup accept BIO */
+  printf("Setting up the accept BIO... ");
+  if(BIO_do_accept(acpt) <= 0) {
+    fprintf(stderr, "Error setting up accept BIO\n");
+    ERR_print_errors_fp(stderr);
+    return(0);
+  }
+  printf("SUCCESS!\n");
+
+  /* Now wait for incoming connection */
+  printf("Setting up the incoming connection... ");
+  if(BIO_do_accept(acpt) <= 0) {
+    fprintf(stderr, "Error in connection\n");
+    ERR_print_errors_fp(stderr);
+    return(0);
+  }
+  printf("SUCCESS!\n");
+
+  /* We only want one connection so remove and free
+   * accept BIO
+   */
+
+  sbio = BIO_pop(acpt);
+
+  BIO_free_all(acpt);
+
+  // wait for ssl handshake from the client
+  printf("Waiting for SSL handshake...");
+  if(BIO_do_handshake(sbio) <= 0) {
+    fprintf(stderr, "Error in SSL handshake\n");
+    ERR_print_errors_fp(stderr);
+    return(0);
+  }
+  printf("SUCCESS!\n");
+  
+  // generate the random number for the challenge
+  srand((unsigned)time(NULL));
+  sprintf(number,"%d", rand());
+  
+  // send the random number to the client
+  printf("Sending the random number challenge to the client. Number is %s... ", number);
+  if(BIO_write(sbio, number, strlen(number)) <= 0) {
+    fprintf(stderr, "Error in sending random number\n");
+    ERR_print_errors_fp(stderr);
+    exit(1);
+  }
+  printf("SUCCESS!\n");
+
+  BIO_flush(sbio);
 
 
 }
 
-void clientSecureTunnel(char * ip){
+int clientSecureTunnel(char * ip){
 
 	int clientSocket;
     struct sockaddr_in server; 
@@ -543,6 +608,85 @@ void clientSecureTunnel(char * ip){
 	
 	write(clientSocket, buffer, 32);
 
+	printf("Starting SSL stuff\n");
+	/* STARTING SSL STUFF */
+	BIO *sbio, *bbio, *acpt, *out;
+  int len;
+  char number[10];
+  char tmpbuf[257];
+  char *ciphertext;
+  SSL_CTX *ctx;
+  SSL *ssl;
+
+
+// initialize the libraries
+  ERR_load_crypto_strings();
+  ERR_load_SSL_strings();
+  OpenSSL_add_all_algorithms();
+
+  /* We would seed the PRNG here if the platform didn't
+   * do it automatically
+   */
+
+  ctx = SSL_CTX_new(SSLv23_client_method());
+
+  /* We'd normally set some stuff like the verify paths and
+   * mode here because as things stand this will connect to
+   * any server whose certificate is signed by any CA.
+   */
+
+  sbio = BIO_new_ssl_connect(ctx);
+
+  BIO_get_ssl(sbio, &ssl);
+
+  if(!ssl) {
+   fprintf(stderr, "Can't locate SSL pointer\n");
+   /* whatever ... */
+  }
+
+  /* Don't want any retries */
+  SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY);
+  /* We might want to do other things with ssl here */
+   
+  // set connection parameters
+  BIO_set_conn_hostname(sbio, ip);
+  BIO_set_conn_port(sbio, "443");
+ 
+  // create a buffer to print to the screen
+  //out = BIO_new_fp(stdout, BIO_NOCLOSE);
+
+  // establish a connection to the server
+  printf("Attempting to to connect to the server... ");
+  if (BIO_do_connect(sbio) <= 0) {
+    fprintf(stderr, "Error connecting to server\n");
+    ERR_print_errors_fp(stderr);
+    BIO_free_all(sbio);
+    BIO_free(out);
+    SSL_CTX_free(ctx);
+    exit(1);
+  }
+  printf("SUCCESS!\n");
+
+  // initiate the handshake with the server
+  printf("Initiating SSL handshake with the server... ");
+  if (BIO_do_handshake(sbio) <= 0) {
+    fprintf(stderr, "Error establishing SSL connection\n");
+    ERR_print_errors_fp(stderr);
+    BIO_free_all(sbio);
+    BIO_free(out);
+    SSL_CTX_free(ctx);
+    exit(1);
+  }
+  printf("SUCCESS!\n");
+
+  // Get the random number from the server
+  printf("Waiting for random number from server... ");
+  memset(tmpbuf, '\0', 11);
+  memset(number, '\0', 11);
+  len = BIO_read(sbio, tmpbuf, 10);
+  strcpy(number, tmpbuf);
+  printf("SUCCESS!\nRandom number is: %s\n", number);
+	
 }
 
 int encrypt(unsigned char *plaintext, int plaintext_len, unsigned char *key,
