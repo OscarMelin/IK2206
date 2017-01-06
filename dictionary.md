@@ -14,3 +14,9 @@ fixed-length groups of bits, called blocks, with an unvarying transformation
 that is specified by a symmetric key. Block ciphers operate as important
 elementary components in the design of many cryptographic protocols, and are
 widely used to implement encryption of bulk data.
+
+
+###Data Encryption Standard
+A symmetric-key algorithm for the encryption of electronic data. Although now
+considered insecure, it was highly influential in the advancement of modern
+cryptography.
