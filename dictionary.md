@@ -8,4 +8,9 @@ one-time pad). Then, each bit or character of the plaintext is encrypted by
 combining it with the corresponding bit or character from the pad using modular
 addition.
 
-###
+###Block cipher
+In cryptography, a block cipher is a deterministic algorithm operating on
+fixed-length groups of bits, called blocks, with an unvarying transformation
+that is specified by a symmetric key. Block ciphers operate as important
+elementary components in the design of many cryptographic protocols, and are
+widely used to implement encryption of bulk data.
