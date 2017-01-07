@@ -32,8 +32,8 @@
 #define ETH_HDR_LEN 14
 #define ARP_PKT_LEN 28
 
-int clientSecureTunnel(char * server);
-int serverSecureTunnel();
+int clientSecureTunnel(int pipe[2], char * server);
+int serverSecureTunnel(int pipe[2]);
 int encrypt(unsigned char *plaintext, int plaintext_len, unsigned char *key,
   unsigned char *iv, unsigned char *ciphertext);
 int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *key,
@@ -310,17 +310,18 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 	
-	int pid;
+	int fd[2], pid;
+	pipe(fd);
+
 	if( (pid = fork()) == 0){
 		/* The child process handles the control channel */
 		if(cliserv == SERVER)
-			serverSecureTunnel();		
+			serverSecureTunnel(fd);		
 		else 
-			clientSecureTunnel(remote_ip);
-			
+			clientSecureTunnel(fd, remote_ip);			
 	}
-	/* Father process handles data channel after 2 seconds sleep */
-	sleep(2);
+	/* Father process handles data channel after 10 seconds sleep */
+	sleep(10);
   
 	/* use select() to handle two descriptors at once */
 	maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
@@ -335,7 +336,7 @@ int main(int argc, char *argv[]) {
     fd_set rd_set;
 
     FD_ZERO(&rd_set);
-    FD_SET(tap_fd, &rd_set); FD_SET(net_fd, &rd_set);
+    FD_SET(tap_fd, &rd_set); FD_SET(net_fd, &rd_set); FD_SET(fd[0], &rd_set);
 
     ret = select(maxfd + 1, &rd_set, NULL, NULL, NULL);
 
@@ -387,7 +388,6 @@ int main(int argc, char *argv[]) {
     if(FD_ISSET(net_fd, &rd_set)){
       /* data from the network: read it, and write it to the tun/tap interface. 
        * We need to read the length first, and then the packet */
-//			printf("net_fd\n");
 	   
       /* Read length */      
       nread = read_n(net_fd, (char *) &plength, sizeof(plength));
@@ -452,6 +452,20 @@ int main(int argc, char *argv[]) {
 		  
     }
 
+    if(FD_ISSET(fd[0], &rd_set)){
+			int n, i, j;
+			if( (n = read(fd[0], buffer, 48)) == 0){
+				printf("Pipe to control channel closed. Closing UDP channel...\n");
+				close(net_fd);
+				exit(0);
+			}else{
+				for (i = 0; i < 32; i++) 
+					key[i] = buffer[i];		
+				for (i = 32, j = 0; i < 48; i++, j++)
+			 		iv[j] = buffer[i];
+			}
+		}
+
   }
   
   return(0);
@@ -465,7 +479,7 @@ int main(int argc, char *argv[]) {
 #define CLKEYF "client.key"
 #define CLCACERT "ca.crt"
 
-int serverSecureTunnel(){
+int serverSecureTunnel(int pipe[2]){
 	unsigned char bytestream[48]; //256 bit key + 128 bit IV to be used for AES256
   unsigned char tmpbuf[100];
   SSL_CTX *ctx;
@@ -587,17 +601,13 @@ int serverSecureTunnel(){
 		exit(-3);	
 	}
 	
+	/* Send session key to the client */
 	if((err = SSL_write(ssl, randomBytes, 48)) <= 0){
 		printf("Impossible to send RGN to client\n");
 		exit(-4);
 	}
-
-	int i, j;
-	for (i = 0; i < 32; i++) 
-  	key[i] = randomBytes[i];
-  
-  for (i = 32, j = 0; i < 48; i++, j++)
- 		iv[j] = randomBytes[i];
+	/* Send session key to the father to be updated */
+	write(pipe[1], randomBytes, 48);
 	
 //	BIO_dump_fp(stdout, key, 32);
 //	BIO_dump_fp(stdout, iv, 16);
@@ -606,7 +616,7 @@ int serverSecureTunnel(){
 	while(1){
 		
 		if((err = SSL_read(ssl, resend, 1)) <= 0){
-			printf("Impossible to read reset session key message from client\n");
+			printf("Impossible to read reset session key message from client. Received: %c\n", resend[1]);
 			exit(-5);
 		}
 
@@ -620,12 +630,10 @@ int serverSecureTunnel(){
 				printf("Impossible to send RGN to client\n");
 				exit(-4);
 			}
-
-			for (i = 0; i < 32; i++) 
-				key[i] = randomBytes[i];		
-			for (i = 32, j = 0; i < 48; i++, j++)
-		 		iv[j] = randomBytes[i];
-
+		
+			/* Send session key to the father to be updated */
+			write(pipe[1], randomBytes, 48);
+			
 		}else if(resend[0] == EOF) {
 			printf("Client wants to close the VPN.\n");
 			SSL_free(ssl);
@@ -639,7 +647,7 @@ int serverSecureTunnel(){
 
 }
 
-int clientSecureTunnel(char * ip){
+int clientSecureTunnel(int pipe[2], char * ip){
 	unsigned char bytestream[48]; //256 bit key + 128 bit IV to be used for AES256
   SSL_CTX *ctx;
   SSL *ssl;
@@ -731,44 +739,39 @@ int clientSecureTunnel(char * ip){
 		  
 	X509_free(server_cert); 
 
-
-
+	/* Receive session key from server */
 	unsigned char randomBytes[48];
 	if((err = SSL_read(ssl, randomBytes, 48)) <= 0){
 		printf("Impossible to read RGN to client\n");
 		exit(-4);
 	}
-
-
-	int i, j;
-	for (i = 0; i < 32; i++) 
-  	key[i] = randomBytes[i];
-  
-  for (i = 32, j = 0; i < 48; i++, j++)
- 		iv[j] = randomBytes[i];
+	
+	/* Send session key to father to update it */
+	write(pipe[1], randomBytes, 48);
 
 //	BIO_dump_fp(stdout, key, 32);
 //	BIO_dump_fp(stdout, iv, 16);
 
 	unsigned char resend[1];
 	while(1){
-		printf("Update session key (y/n)? ");
+		printf("Update session key (y/n)? (CTRL-C to close VPN)");
 		scanf("%c", &resend[0]);
 		if(resend[0] == 'y'){
+			/* Send "command" to regenerate session key */
 			if((err = SSL_write(ssl, resend, 1)) <= 0){
-				printf("Impossible to send reset session key message to server\n");
+				printf("Impossible to send reset session key message to server. Scanf: %c\n", resend[0]);
 				exit(-5);
 			}
-
+			
+			/* Receive new session key from server */
 			if((err = SSL_read(ssl, randomBytes, 48)) <= 0){
 				printf("Impossible to read RGN to client\n");
 				exit(-4);
 			}
 
-			for (i = 0; i < 32; i++) 
-				key[i] = randomBytes[i];		
-			for (i = 32, j = 0; i < 48; i++, j++)
-		 		iv[j] = randomBytes[i];
+
+			/* Send session key to father to update it */
+			write(pipe[1], randomBytes, 48);
 
 		} else if(resend[0] == EOF){
 			if((err = SSL_write(ssl, resend, 1)) <= 0){
