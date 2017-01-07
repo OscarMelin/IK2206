@@ -174,10 +174,10 @@ void usage(void) {
 }
 
 /* KEY */
-unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
+unsigned char key[32];
   
 /* IV */
-unsigned char *iv = (unsigned char *)"0123456789012345";
+unsigned char iv[16];
 
 int main(int argc, char *argv[]) {
 
@@ -300,6 +300,7 @@ int main(int argc, char *argv[]) {
 	}
 	else {
 		clientSecureTunnel(remote_ip);
+		printf("Out of clientSecureTunner\n");
 	}
 	
 	
@@ -441,7 +442,7 @@ int main(int argc, char *argv[]) {
 
 #define CERTF "server.crt"
 #define KEYF "server.key"
-#define CACERT "crt"
+#define CACERT "ca.crt"
 
 #define CLCERTF "client.crt"
 #define CLKEYF "client.key"
@@ -678,13 +679,13 @@ int clientSecureTunnel(char * ip){
 
 
 
-	unsigned char randomBytes[49];
+	unsigned char randomBytes[48];
 	if((err = SSL_read(ssl, randomBytes, 48)) <= 0){
 		printf("Impossible to read RGN to client\n");
 		exit(-4);
 	}
-	randomBytes[49] = '\0';
-	printf("RGN: %s\n", randomBytes);
+
+
 
 	int i, j;
 	for (i = 0; i < 32; i++) 
@@ -693,6 +694,12 @@ int clientSecureTunnel(char * ip){
   for (i = 32, j = 0; i < 48; i++, j++) 
  		iv[j] = randomBytes[i];  
 
+	//BIO_dump_fp (stdout, key, 32);
+
+	//BIO_dump_fp (stdout, iv, 16);
+
+
+	printf("Key and IV set\n");
 }
 
 int encrypt(unsigned char *plaintext, int plaintext_len, unsigned char *key,
