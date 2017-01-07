@@ -13,6 +13,7 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <errno.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <openssl/conf.h>
 #include <openssl/evp.h>
@@ -173,6 +174,14 @@ void usage(void) {
   exit(1);
 }
 
+void signalHandler(int signal){
+    
+    int pid, stat;    
+    while ( (pid = waitpid(-1, &stat, WNOHANG)) > 0){
+			exit(10);
+    }
+}
+
 /* KEY */
 unsigned char key[32];
   
@@ -294,14 +303,24 @@ int main(int argc, char *argv[]) {
   }
 
   net_fd = sock_fd;
+
+	// Establish handling of SIGCHLD signal 
+  if (signal(SIGCHLD, signalHandler) == SIG_ERR) {
+    perror("Unable to set up signal handler for SIGCHLD");
+    exit(1);
+  }
 	
-	if(cliserv == SERVER){		
-		serverSecureTunnel();
+	int pid;
+	if( (pid = fork()) == 0){
+		/* The child process handles the control channel */
+		if(cliserv == SERVER)
+			serverSecureTunnel();		
+		else 
+			clientSecureTunnel(remote_ip);
+			
 	}
-	else {
-		clientSecureTunnel(remote_ip);
-		printf("out of secure tunnel\n");
-	}	
+	/* Father process handles data channel after 2 seconds sleep */
+	sleep(2);
   
 	/* use select() to handle two descriptors at once */
 	maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
@@ -580,8 +599,42 @@ int serverSecureTunnel(){
   for (i = 32, j = 0; i < 48; i++, j++)
  		iv[j] = randomBytes[i];
 	
-	BIO_dump_fp(stdout, key, 32);
-	BIO_dump_fp(stdout, iv, 16);
+//	BIO_dump_fp(stdout, key, 32);
+//	BIO_dump_fp(stdout, iv, 16);
+
+	unsigned char resend[1];
+	while(1){
+		
+		if((err = SSL_read(ssl, resend, 1)) <= 0){
+			printf("Impossible to read reset session key message from client\n");
+			exit(-5);
+		}
+
+		if(resend[0] == 'y'){
+			if (!RAND_bytes(randomBytes, sizeof randomBytes)) {
+				printf("Impossible to generate random number to send to client\n");
+				exit(-3);	
+			}
+	
+			if((err = SSL_write(ssl, randomBytes, 48)) <= 0){
+				printf("Impossible to send RGN to client\n");
+				exit(-4);
+			}
+
+			for (i = 0; i < 32; i++) 
+				key[i] = randomBytes[i];		
+			for (i = 32, j = 0; i < 48; i++, j++)
+		 		iv[j] = randomBytes[i];
+
+		}else if(resend[0] == EOF) {
+			printf("Client wants to close the VPN.\n");
+			SSL_free(ssl);
+      SSL_CTX_free(ctx);
+      close(sd);
+			exit(4);
+		}
+
+	}
 
 
 }
@@ -694,8 +747,40 @@ int clientSecureTunnel(char * ip){
   for (i = 32, j = 0; i < 48; i++, j++)
  		iv[j] = randomBytes[i];
 
-	BIO_dump_fp(stdout, key, 32);
-	BIO_dump_fp(stdout, iv, 16);
+//	BIO_dump_fp(stdout, key, 32);
+//	BIO_dump_fp(stdout, iv, 16);
+
+	unsigned char resend[1];
+	while(1){
+		printf("Update session key (y/n)? ");
+		scanf("%c", &resend[0]);
+		if(resend[0] == 'y'){
+			if((err = SSL_write(ssl, resend, 1)) <= 0){
+				printf("Impossible to send reset session key message to server\n");
+				exit(-5);
+			}
+
+			if((err = SSL_read(ssl, randomBytes, 48)) <= 0){
+				printf("Impossible to read RGN to client\n");
+				exit(-4);
+			}
+
+			for (i = 0; i < 32; i++) 
+				key[i] = randomBytes[i];		
+			for (i = 32, j = 0; i < 48; i++, j++)
+		 		iv[j] = randomBytes[i];
+
+		} else if(resend[0] == EOF){
+			if((err = SSL_write(ssl, resend, 1)) <= 0){
+				printf("Impossible to send close message to server\n");
+				exit(-5);
+			}
+			SSL_free(ssl);
+      SSL_CTX_free(ctx);
+      close(sd);
+		}	
+
+	}
 
 }
 
