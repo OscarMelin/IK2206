@@ -612,7 +612,7 @@ int serverSecureTunnel(int pipe[2]){
 //	BIO_dump_fp(stdout, key, 32);
 //	BIO_dump_fp(stdout, iv, 16);
 
-	unsigned char resend[1];
+	unsigned char resend[5];
 	while(1){
 		
 		if((err = SSL_read(ssl, resend, 1)) <= 0){
@@ -634,7 +634,7 @@ int serverSecureTunnel(int pipe[2]){
 			/* Send session key to the father to be updated */
 			write(pipe[1], randomBytes, 48);
 			
-		}else if(resend[0] == EOF) {
+		}else if(!strcmp(resend, "exit")) {
 			printf("Client wants to close the VPN.\n");
 			SSL_free(ssl);
       SSL_CTX_free(ctx);
@@ -752,10 +752,10 @@ int clientSecureTunnel(int pipe[2], char * ip){
 //	BIO_dump_fp(stdout, key, 32);
 //	BIO_dump_fp(stdout, iv, 16);
 
-	unsigned char resend[1];
+	unsigned char resend[5];
 	while(1){
-		printf("Update session key (y/n)? (CTRL-C to close VPN)");
-		scanf("%c", &resend[0]);
+		printf("Update session key (y/n)? (Write 'exit' to close VPN)");
+		scanf("%s", resend);
 		if(resend[0] == 'y'){
 			/* Send "command" to regenerate session key */
 			if((err = SSL_write(ssl, resend, 1)) <= 0){
@@ -773,7 +773,7 @@ int clientSecureTunnel(int pipe[2], char * ip){
 			/* Send session key to father to update it */
 			write(pipe[1], randomBytes, 48);
 
-		} else if(resend[0] == EOF){
+		} else if(!strcmp(resend, "exit")){
 			if((err = SSL_write(ssl, resend, 1)) <= 0){
 				printf("Impossible to send close message to server\n");
 				exit(-5);
