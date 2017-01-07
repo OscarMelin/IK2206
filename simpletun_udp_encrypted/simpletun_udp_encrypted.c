@@ -174,10 +174,10 @@ void usage(void) {
 }
 
 /* KEY */
-unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
+unsigned char key[32];
   
 /* IV */
-unsigned char *iv = (unsigned char *)"0123456789012345";
+unsigned char iv[16];
 
 int main(int argc, char *argv[]) {
 
@@ -300,9 +300,8 @@ int main(int argc, char *argv[]) {
 	}
 	else {
 		clientSecureTunnel(remote_ip);
-	}
-	
-	
+		printf("out of secure tunnel\n");
+	}	
   
 	/* use select() to handle two descriptors at once */
 	maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
@@ -441,7 +440,7 @@ int main(int argc, char *argv[]) {
 
 #define CERTF "server.crt"
 #define KEYF "server.key"
-#define CACERT "crt"
+#define CACERT "ca.crt"
 
 #define CLCERTF "client.crt"
 #define CLKEYF "client.key"
@@ -563,8 +562,7 @@ int serverSecureTunnel(){
   } else
       printf("Client does not have certificate.\n");
 
-	unsigned char randomBytes[49];
-	memset(randomBytes, '\0', 48);
+	unsigned char randomBytes[48];
 	if (!RAND_bytes(randomBytes, sizeof randomBytes)) {
 		printf("Impossible to generate random number to send to client\n");
 		exit(-3);	
@@ -574,15 +572,22 @@ int serverSecureTunnel(){
 		printf("Impossible to send RGN to client\n");
 		exit(-4);
 	}
-	randomBytes[49] = '\0';
-	printf("RGN: %s\n", randomBytes);
+
+	int i, j;
+	for (i = 0; i < 32; i++) 
+  	key[i] = randomBytes[i];
+  
+  for (i = 32, j = 0; i < 48; i++, j++)
+ 		iv[j] = randomBytes[i];
 	
+	BIO_dump_fp(stdout, key, 32);
+	BIO_dump_fp(stdout, iv, 16);
+
 
 }
 
 int clientSecureTunnel(char * ip){
 	unsigned char bytestream[48]; //256 bit key + 128 bit IV to be used for AES256
-  unsigned char tmpbuf[100];
   SSL_CTX *ctx;
   SSL *ssl;
   X509 *server_cert;
@@ -591,7 +596,7 @@ int clientSecureTunnel(char * ip){
   int sd;
   struct sockaddr_in sa;
   SSL_METHOD *meth;
-  char ipstr[INET6_ADDRSTRLEN];	
+  char ipstr[INET6_ADDRSTRLEN];
 
 	/* Starting TCP connection to server */
 	if( (sd = socket(AF_INET, SOCK_STREAM, 0)) < 0 )
@@ -667,31 +672,30 @@ int clientSecureTunnel(char * ip){
       printf("\t issuer: %s\n", str);
       OPENSSL_free (str);
 
-      /* We could do all sorts of certificate verification stuff here before
-         deallocating the certificate. */
-
       
   } else
       printf("Server does not have certificate.\n");
 		  
-	X509_free(server_cert); //Frees the datastructure holding the client cert
+	X509_free(server_cert); 
 
 
 
-	unsigned char randomBytes[49];
+	unsigned char randomBytes[48];
 	if((err = SSL_read(ssl, randomBytes, 48)) <= 0){
 		printf("Impossible to read RGN to client\n");
 		exit(-4);
 	}
-	randomBytes[49] = '\0';
-	printf("RGN: %s\n", randomBytes);
+
 
 	int i, j;
 	for (i = 0; i < 32; i++) 
   	key[i] = randomBytes[i];
   
-  for (i = 32, j = 0; i < 48; i++, j++) 
- 		iv[j] = randomBytes[i];  
+  for (i = 32, j = 0; i < 48; i++, j++)
+ 		iv[j] = randomBytes[i];
+
+	BIO_dump_fp(stdout, key, 32);
+	BIO_dump_fp(stdout, iv, 16);
 
 }
 
