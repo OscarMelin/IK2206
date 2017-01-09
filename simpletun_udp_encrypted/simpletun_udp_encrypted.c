@@ -192,19 +192,19 @@ int main(int argc, char *argv[]) {
 
   int tap_fd, option;
   int flags = IFF_TUN;
-  char if_name[IFNAMSIZ] = "";
-  int header_len = IP_HDR_LEN;
-  int maxfd;
   uint16_t nread, nwrite, plength;
 //  uint16_t total_len, ethertype;
   char buffer[BUFSIZE];
   struct sockaddr_in local, remote;
-  char remote_ip[16] = "";
-  unsigned short int port = PORT;
-  int sock_fd, net_fd, optval = 1;
   socklen_t remotelen;
   int cliserv = -1;    /* must be specified on cmd line */
   unsigned long int tap2net = 0, net2tap = 0;
+  char remote_ip[16] = "";
+  unsigned short int port = PORT;
+  int sock_fd, net_fd, optval = 1;
+  char if_name[IFNAMSIZ] = "";
+  int header_len = IP_HDR_LEN;
+  int maxfd;
 
   progname = argv[0];
       
