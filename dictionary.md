@@ -47,3 +47,4 @@ National Institute of Standards and Technology (NIST) in 2001.
 
 
 ##Stream cipher
+As opposed to using a block cipher, a stream cipher encrypts data one bit or one byte at a time, as it is streaming by. Not block for block.
